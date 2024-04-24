@@ -1,4 +1,5 @@
 import pygame
+import random
 
 COLOR_BOMB = (255, 0, 0)
 COLOR_FLAG = (255, 0, 0)
@@ -42,3 +43,59 @@ class Tile:
             if self.is_flagged:
                 text = myfont.render("F", 1, COLOR_FLAG)
                 screen.blit(text, (self.col * self.size_of_square + 20, self.row * self.size_of_square + 20))
+                
+class MinesweeperGrid:
+    def __init__(self, rows, cols, size_of_square, mines):
+        self.rows = rows
+        self.cols = cols
+        self.size_of_square = size_of_square
+        self.tiles = [[Tile(row, col, size_of_square) for col in range(cols)] for row in range(rows)]
+        self.plant_mines(mines)
+        self.game_over = False
+        
+    def plant_mines(self, num_mines):
+        bomb_positions = random.sample([(r, c) for r in range(self.rows) for c in range(self.cols)], num_mines)
+        
+        for row, col in bomb_positions:
+            self.tiles[row][col].is_bomb = True
+        
+        for row in range(self.rows):
+            for col in range(self.cols):
+                if not self.tiles[row][col].is_bomb:
+                    neighbors = self.get_neighbors(row, col)
+                    self.tiles[row][col].num_adjacent_bombs = sum(self.tiles[r][c].is_bomb for r, c in neighbors)
+
+    def reveal_tile(self, row, col):
+        tile = self.tiles[row][col]
+        if not tile.is_revealed and not tile.is_flagged:
+            tile.reveal()
+            if tile.is_bomb:
+                self.game_over = True
+                return
+            if not tile.is_bomb and tile.num_adjacent_bombs == 0:
+                neighbors = self.get_neighbors(row, col)
+                for neighbor_row, neighbor_col in neighbors:
+                    self.reveal_tile(neighbor_row, neighbor_col)
+
+    def flag_tile(self, row, col):
+        tile = self.tiles[row][col]
+        if not tile.is_revealed:
+            tile.flag()
+
+    def get_neighbors(self, row, col):
+        neighbors = []
+        for d_row in range(-1, 2):
+            for d_col in range(-1, 2):
+                if d_row == 0 and d_col == 0:
+                    continue
+                neighbor_row = row + d_row
+                neighbor_col = col + d_col
+                if 0 <= neighbor_row < self.rows and 0 <= neighbor_col < self.cols:
+                    neighbors.append((neighbor_row, neighbor_col))
+                    
+        return neighbors
+
+    def draw(self, screen, myfont):
+        for row in range(self.rows):
+            for col in range(self.cols):
+                self.tiles[row][col].draw(screen, myfont)
