@@ -5,6 +5,7 @@ COLOR_BOMB = (255, 0, 0)
 COLOR_FLAG = (255, 0, 0)
 COLOR_REVEALED_TILE = (192, 192, 192)
 COLOR_UNREVEALED_TILE = (128, 128, 128)
+COLOR_SCREEN_FILL = (255, 255, 255)
 
 class Tile:
     def __init__(self, row, col, size_of_square):
@@ -99,3 +100,38 @@ class MinesweeperGrid:
         for row in range(self.rows):
             for col in range(self.cols):
                 self.tiles[row][col].draw(screen, myfont)
+                
+class Game:
+    def __init__(self, rows, cols, size_of_square, mines):
+        self.grid = MinesweeperGrid(rows, cols, size_of_square, mines)
+        pygame.init()
+        pygame.font.init()
+        self.myfont = pygame.font.SysFont("monospace-bold", 100)
+        self.screen = pygame.display.set_mode((cols * size_of_square, rows * size_of_square))
+
+    def main_loop(self):
+        while not self.grid.game_over:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    self.grid.game_over = True
+                elif event.type == pygame.MOUSEBUTTONDOWN:
+                    if event.button == 1:
+                        self.handle_left_click(pygame.mouse.get_pos())
+                    elif event.button == 3:
+                        self.handle_right_click(pygame.mouse.get_pos())
+
+            self.screen.fill(COLOR_SCREEN_FILL)
+            self.grid.draw(self.screen, self.myfont)
+            pygame.display.flip()
+
+    def handle_left_click(self, pos):
+        col = pos[0] // self.grid.size_of_square
+        row = pos[1] // self.grid.size_of_square
+        if 0 <= row < self.grid.rows and 0 <= col < self.grid.cols:
+            self.grid.reveal_tile(row, col)
+
+    def handle_right_click(self, pos):
+        col = pos[0] // self.grid.size_of_square
+        row = pos[1] // self.grid.size_of_square
+        if 0 <= row < self.grid.rows and 0 <= col < self.grid.cols:
+            self.grid.flag_tile(row, col)
