@@ -1,5 +1,5 @@
 from matplotlib import pyplot as plt
-from minesweeper.minesweeper import MinesweeperDiscreetEnv, MinesweeperEnv
+from minesweeper import MinesweeperDiscreetEnv
 
 import numpy as np
 import random
