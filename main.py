@@ -87,9 +87,15 @@ def main():
         epsilons.append(epsilon)
     print ("Training score over time: " + str(sum(training_rewards)/train_episodes))
 
+
+    mean_reward = np.mean(training_rewards)
+    std_reward = np.std(training_rewards)
+    print(f"Mean_reward={mean_reward:.2f} +/- {std_reward:.2f}")
+
     #Visualizing results and total reward over all episodes
     x = range(train_episodes)
     plt.plot(x, training_rewards)
+    plt.axhline(y=mean_reward, color='r', linestyle='--', label='Mean Reward')
     plt.xlabel('Episode')
     plt.ylabel('Training total reward')
     plt.title('Total rewards over all episodes in training') 
@@ -101,10 +107,6 @@ def main():
     plt.ylabel('Epsilon')
     plt.title("Epsilon for episode")
     plt.show()
-
-    mean_reward = np.mean(training_rewards)
-    std_reward = np.std(training_rewards)
-    print(f"Mean_reward={mean_reward:.2f} +/- {std_reward:.2f}")
 
 if __name__ == "__main__":
     main()
