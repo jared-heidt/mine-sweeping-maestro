@@ -2,7 +2,12 @@ import numpy as np
 import random
 
 class QLearningAgent:
-    def __init__(self, env, learning_rate=0.1, discount_factor=0.9, exploration_rate=1.0, exploration_decay=0.99):
+    def __init__(self, 
+                 env, 
+                 learning_rate=0.001, #0.1 
+                 discount_factor=0.99, #0.9
+                 exploration_rate=1.0, #1.0
+                 exploration_decay=0.01): #0.99
         self.env = env
         self.learning_rate = learning_rate
         self.discount_factor = discount_factor

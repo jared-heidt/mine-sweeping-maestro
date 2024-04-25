@@ -5,7 +5,9 @@ import pandas as pd
 class MinesweeperEnv(object):
     def __init__(self, width, height, n_mines,
         # based on https://github.com/jakejhansen/minesweeper_solver
-        rewards={'win':1, 'lose':-1, 'progress':0.3, 'guess':-0.3, 'no_progress' : -0.3}):
+        #rewards={'win':1, 'lose':-1, 'progress':0.3, 'guess':-0.3, 'no_progress' : -0.3}
+        rewards={'win':1, 'lose':-1, 'progress':1, 'guess':-0.3, 'no_progress' : -0.3}
+        ):
         self.nrows, self.ncols = width, height
         self.ntiles = self.nrows * self.ncols
         self.n_mines = n_mines
