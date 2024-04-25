@@ -2,5 +2,5 @@
 
 
 ## References
-https://github.com/jakejhansen/minesweeper_solver/blob/master/minesweeper_pygame.py
-- Helpful in developing game logic
+https://github.com/gelanat/reinforcement-learning/
+https://github.com/aylint/gym-minesweeper

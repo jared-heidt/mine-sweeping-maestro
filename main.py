@@ -41,7 +41,7 @@ def main():
         #Starting the tracker for the rewards
         total_training_rewards = 0
         
-        for step in range(10000):
+        for step in range(max_steps):
             #Choosing an action given the states based on a random number
             exp_exp_tradeoff = random.uniform(0, 1) 
             
