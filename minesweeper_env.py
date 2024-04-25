@@ -2,27 +2,10 @@ import random
 import numpy as np
 import pandas as pd
 
-WIN_STR = 'win'
-WIN_REWARD = 1
-LOSE_STR = 'lose'
-LOSE_REWARD = -1
-PROGRESS_STR = 'progress'
-PROGRESS_REWARD = 0.3
-GUESS_STR = 'guess'
-GUESS_REWARD = -0.3
-NO_PROGRESS_STR = 'no_progress'
-NO_PROGRESS_REWARD = -0.3
-
-REWARDS = {
-    WIN_STR: WIN_REWARD,
-    LOSE_STR: LOSE_REWARD,
-    PROGRESS_STR: PROGRESS_REWARD,
-    GUESS_STR: GUESS_REWARD,
-    NO_PROGRESS_STR: NO_PROGRESS_REWARD,
-}
-
 class MinesweeperEnv(object):
-    def __init__(self, width, height, n_mines, rewards=REWARDS):
+    def __init__(self, width, height, n_mines,
+        # based on https://github.com/jakejhansen/minesweeper_solver
+        rewards={'win':1, 'lose':-1, 'progress':0.3, 'guess':-0.3, 'no_progress' : -0.3}):
         self.nrows, self.ncols = width, height
         self.ntiles = self.nrows * self.ncols
         self.n_mines = n_mines
@@ -32,6 +15,7 @@ class MinesweeperEnv(object):
         self.n_clicks = 0
         self.n_progress = 0
         self.n_wins = 0
+
         self.rewards = rewards
 
     def init_grid(self):
@@ -77,10 +61,12 @@ class MinesweeperEnv(object):
 
         return board
 
-
     def get_state_im(self, state):
-        #Gets the numeric image representation state of the board.
-        #This is what will be the input for the DQN.
+        '''
+        Gets the numeric image representation state of the board.
+        This is what will be the input for the DQN.
+        '''
+
         state_im = [t['value'] for t in state]
         state_im = np.reshape(state_im, (self.nrows, self.ncols, 1)).astype(object)
 
@@ -92,7 +78,6 @@ class MinesweeperEnv(object):
 
         return state_im
 
-    
     def init_state(self):
         unsolved_array = np.full((self.nrows, self.ncols), 'U', dtype='object')
 
@@ -103,7 +88,7 @@ class MinesweeperEnv(object):
         state_im = self.get_state_im(state)
 
         return state, state_im
-        
+
     def click(self, action_index):
         coord = self.state[action_index]['coord']
         value = self.board[coord]
@@ -149,49 +134,59 @@ class MinesweeperEnv(object):
                     if self.board[row, col] == 0.0:
                         self.reveal_neighbors((row, col), clicked_tiles=processed)
 
-    '''
-    # Start dumb code 
-    def init_state(self):
-        # Initialize the state as an array of 'U's (unrevealed)
-        state = np.full((self.nrows, self.ncols), 'U', dtype=object)
-        state_im = self.get_state_im(state)
-        return state, state_im
+    def reset(self):
+        self.n_clicks = 0
+        self.n_progress = 0
+        self.grid = self.init_grid()
+        self.board = self.get_board()
+        self.state, self.state_im = self.init_state()
 
-    def get_state_im(self, state):
-        # Convert the state to numeric image representation
-        state_im = state.copy()
-        state_im[state_im == 'U'] = -1  # Unrevealed tiles
-        state_im[state_im == 'B'] = -2  # Bombs
-        state_im = state_im.astype(np.float16) / 8  # Scale to range [0, 1]
-        return state_im
+    def step(self, action_index):
+        done = False
+        coords = self.state[action_index]['coord']
 
-    def click(self, action_index):
-        # Update the state by revealing the value at the clicked tile
-        x, y = np.unravel_index(action_index, (self.nrows, self.ncols))
-        if self.state_im[x, y] == -1:  # If unrevealed
-            value = self.board[x, y]
-            self.state_im[x, y] = value
-            if value == 0:
-                self.reveal_neighbors((x, y))
+        current_state = self.state_im
 
-    def reveal_neighbors(self, coord):
-        # Recursively reveal neighboring tiles if they are empty
-        x, y = coord
-        for i in range(max(0, x - 1), min(self.nrows, x + 2)):
-            for j in range(max(0, y - 1), min(self.ncols, y + 2)):
-                if self.state_im[i, j] == -1:  # If unrevealed
-                    self.state_im[i, j] = self.board[i, j]
-                    if self.board[i, j] == 0:
-                        self.reveal_neighbors((i, j))
-    # End dumb code 
-    '''
+        # get neighbors before action
+        neighbors = self.get_neighbors(coords)
 
-    def find_state_index(self, coord):
-        for i, tile in enumerate(self.state):
-            if tile['coord'] == coord:
-                return i
-        return None  # Return None if the coordinate pair is not found in the state
+        self.click(action_index)
 
+        # update state image
+        new_state_im = self.get_state_im(self.state)
+        self.state_im = new_state_im
+
+        if self.state[action_index]['value']=='B': # if lose
+            reward = self.rewards['lose']
+            done = True
+
+        elif np.sum(new_state_im==-0.125) == self.n_mines: # if win
+            reward = self.rewards['win']
+            done = True
+            self.n_progress += 1
+            self.n_wins += 1
+
+        elif np.sum(self.state_im == -0.125) == np.sum(current_state == -0.125):
+            reward = self.rewards['no_progress']
+
+        else: # if progress
+            if all(t==-0.125 for t in neighbors): # if guess (all neighbors are unsolved)
+                reward = self.rewards['guess']
+
+            else:
+                reward = self.rewards['progress']
+                self.n_progress += 1 # track n of non-isoloated clicks
+
+        return self.state_im, reward, done
+    
+
+    # UNUSED
+    def draw_state(self, state_im):
+        state = state_im * 8.0
+        state_df = pd.DataFrame(state.reshape((self.nrows, self.ncols)), dtype=np.int8)
+
+        display(state_df.style.applymap(self.color_state))
+    
     def color_state(self, value):
         if value == -1:
             color = 'white'
@@ -217,62 +212,3 @@ class MinesweeperEnv(object):
             color = 'magenta'
 
         return f'color: {color}'
-
-    def draw_state(self, state_im):
-        state = state_im * 8.0
-        state_df = pd.DataFrame(state.reshape((self.nrows, self.ncols)), dtype=np.int8)
-
-        display(state_df.style.applymap(self.color_state))
-
-    
-
-    def reset(self):
-        self.n_clicks = 0
-        self.n_progress = 0
-        self.grid = self.init_grid()
-        self.board = self.get_board()
-        self.state, self.state_im = self.init_state()
-        print('Set State in MinesweeperEnv to the following: ' + str(self.state))
-
-    def step(self, action_index):
-        done = False
-        # coords = self.state[action_index]['coord']
-        print('\nBANG\n' + str(action_index) + '\nBANG\n')
-        coords = action_index[1]['coord']
-        value = action_index[1]['value']
-
-    
-
-        current_state = self.state_im
-
-        # get neighbors before action
-        neighbors = self.get_neighbors(coords)
-
-        self.click(action_index)
-
-        # update state image
-        new_state_im = self.get_state_im(self.state)
-        self.state_im = new_state_im
-
-        if self.state[action_index]['value']=='B': # if lose
-            reward = self.rewards[LOSE_STR]
-            done = True
-
-        elif np.sum(new_state_im==-0.125) == self.n_mines: # if win
-            reward = self.rewards[WIN_STR]
-            done = True
-            self.n_progress += 1
-            self.n_wins += 1
-
-        elif np.sum(self.state_im == -0.125) == np.sum(current_state == -0.125):
-            reward = self.rewards[NO_PROGRESS_STR]
-
-        else: # if progress
-            if all(t==-0.125 for t in neighbors): # if guess (all neighbors are unsolved)
-                reward = self.rewards[GUESS_STR]
-
-            else:
-                reward = self.rewards[PROGRESS_STR]
-                self.n_progress += 1 # track n of non-isoloated clicks
-
-        return self.state_im, reward, done#
