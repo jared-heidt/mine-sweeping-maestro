@@ -1,264 +1,435 @@
-import random
-from abc import ABCMeta, abstractmethod
-import pdb
+import sys
+from six import StringIO
+from random import randint
+
 import numpy as np
-from scipy import signal
-from scipy import ndimage
+import gym
+from gym import spaces
 
-WINREWARD = 10
-LOSREWARD = -10
-PROGRESSREWARD= 1
+# default : easy board
+BOARD_SIZE = 10
+NUM_MINES = 9
+
+# cell values, non-negatives indicate number of neighboring mines
+MINE = -1
+CLOSED = -2
 
 
-w_k = np.array(    [[1, 1, 1],
-                    [1, 0, 1],
-                    [1, 1, 1],],
-                   dtype='int')
-class GameConfig(object):
-    def __init__(self, width=8, height=8, num_mines=10):
-        self.width = width
-        self.height = height
+def board2str(board, end='\n'):
+    """
+    Format a board as a string
+
+    Parameters
+    ----
+    board : np.array
+    end : str
+
+    Returns
+    ----
+    s : str
+    """
+    s = ''
+    for x in range(board.shape[0]):
+        for y in range(board.shape[1]):
+            s += str(board[x][y]) + '\t'
+        s += end
+    return s[:-len(end)]
+
+
+def is_new_move(my_board, x, y):
+    """ return true if this is not an already clicked place"""
+    return my_board[x, y] == CLOSED
+
+
+def is_valid(x, y):
+    """ returns if the coordinate is valid"""
+    return (x >= 0) & (x < BOARD_SIZE) & (y >= 0) & (y < BOARD_SIZE)
+
+
+def is_win(my_board):
+    """ return if the game is won """
+    return np.count_nonzero(my_board == CLOSED) == NUM_MINES
+
+
+def is_mine(board, x, y):
+    """return if the coordinate has a mine or not"""
+    return board[x, y] == MINE
+
+
+def place_mines(board_size, num_mines):
+    """generate a board, place mines randomly"""
+    mines_placed = 0
+    board = np.zeros((board_size, board_size), dtype=int)
+    while mines_placed < num_mines:
+        rnd = randint(0, board_size * board_size)
+        x = int(rnd / board_size)
+        y = int(rnd % board_size)
+        if is_valid(x, y):
+            if not is_mine(board, x, y):
+                board[x, y] = MINE
+                mines_placed += 1
+    return board
+
+
+class MinesweeperEnv(gym.Env):
+    metadata = {"render.modes": ["ansi", "human"]}
+
+    def __init__(self, board_size=BOARD_SIZE, num_mines=NUM_MINES):
+        """
+        Create a minesweeper game.
+
+        Parameters
+        ----
+        board_size: int     shape of the board
+            - int: the same as (int, int)
+        num_mines: int   num mines on board
+        """
+
+        self.board_size = board_size
         self.num_mines = num_mines
-        self.cellsStateCount=10
+        self.board = place_mines(board_size, num_mines)
+        self.my_board = np.ones((board_size, board_size), dtype=int) * CLOSED
+        self.valid_actions = np.ones((self.board_size, self.board_size), dtype=bool)
 
+        self.observation_space = spaces.Box(low=-2, high=9,
+                                            shape=(self.board_size, self.board_size), dtype=int)
+        self.action_space = spaces.MultiDiscrete([self.board_size, self.board_size])
 
-class Game(object):
-    def __init__(self, config):
-        self.width = config.width
-        self.height = config.height
-        self.num_mines = config.num_mines
-        self.board = [[False for y in range(self.height)] for x in range(self.width)]
-        self.exposed = [[False for y in range(self.height)] for x in range(self.width)]
-        self.counts = [[0 for y in range(self.height)] for x in range(self.width)]
-        self.num_moves = 0
-        self.num_safe_squares = self.width * self.height - self.num_mines
-        self.num_exposed_squares = 0
-        self.explosion = False
-        self.flags = []
+    def count_neighbour_mines(self, x, y):
+        """return number of mines in neighbour cells given an x-y coordinate
 
-        self._place_mines()
-        self._init_counts()
-
-    def select(self, x, y):
+            Cell -->Current Cell(row, col)
+            N -->  North(row - 1, col)
+            S -->  South(row + 1, col)
+            E -->  East(row, col + 1)
+            W -->  West(row, col - 1)
+            N.E --> North - East(row - 1, col + 1)
+            N.W --> North - West(row - 1, col - 1)
+            S.E --> South - East(row + 1, col + 1)
+            S.W --> South - West(row + 1, col - 1)
         """
-        Select a square to expose. Coordinates are zero based.
-        If the square has already been selected, returns None.
-        Returns a MoveResult object with success/failure and a 
-	list of squares exposed.
+        neighbour_mines = 0
+        for _x in range(x - 1, x + 2):
+            for _y in range(y - 1, y + 2):
+                if is_valid(_x, _y):
+                    if is_mine(self.board, _x, _y):
+                        neighbour_mines += 1
+        return neighbour_mines
+
+    def open_neighbour_cells(self, my_board, x, y):
+        """return number of mines in neighbour cells given an x-y coordinate
+
+            Cell -->Current Cell(row, col)
+            N -->  North(row - 1, col)
+            S -->  South(row + 1, col)
+            E -->  East(row, col + 1)
+            W -->  West(row, col - 1)
+            N.E --> North - East(row - 1, col + 1)
+            N.W --> North - West(row - 1, col - 1)
+            S.E --> South - East(row + 1, col + 1)
+            S.W --> South - West(row + 1, col - 1)
         """
-        if self._is_outside_board(x, y):
-            # raise ValueError('Position ({0},{1}) is outside the board'.format(x, y))
-            print("_________________________________ WRONG 1")
-            return None
-        if self.explosion:
-            print("_________________________________ WRONG 2")
-            return None
-        if self.exposed[x][y]:
-            print("_________________________________ WRONG ")
-            return None
-        self.num_moves += 1
-        if self.board[x][y]:
-            self.explosion = True
-            self.exposed[x][y] = True
-            return MoveResult(True,reward=LOSREWARD)
+        for _x in range(x-1, x+2):
+            for _y in range(y-1, y+2):
+                if is_valid(_x, _y):
+                    if is_new_move(my_board, _x, _y):
+                        my_board[_x, _y] = self.count_neighbour_mines(_x, _y)
+                        if my_board[_x, _y] == 0:
+                            my_board = self.open_neighbour_cells(my_board, _x, _y)
+        return my_board
 
-        updatedBoard=self._update_board(x, y)
-        if self.num_exposed_squares == self.num_safe_squares:
-            # pdb.set_trace()
-            return MoveResult(False,updatedBoard ,reward=WINREWARD)
-        return MoveResult(False, updatedBoard,reward=PROGRESSREWARD)
-
-    def get_state(self):
+    def get_next_state(self, state, x, y):
         """
-        Get the current state of the game
-        None means not exposed and the rest are counts
-        This does not contain the exploded mine if one exploded.
+        Get the next state.
+
+        Parameters
+        ----
+        state : (np.array)   visible board
+        x : int    location
+        y : int    location
+
+        Returns
+        ----
+        next_state : (np.array)    next visible board
+        game_over : (bool) true if game over
+
+        """
+        my_board = state
+        game_over = False
+        if is_mine(self.board, x, y):
+            my_board[x, y] = MINE
+            game_over = True
+        else:
+            my_board[x, y] = self.count_neighbour_mines(x, y)
+            if my_board[x, y] == 0:
+                my_board = self.open_neighbour_cells(my_board, x, y)
+        self.my_board = my_board
+        return my_board, game_over
+
+    def reset(self):
+        """
+        Reset a new game episode. See gym.Env.reset()
+
+        Returns
+        ----
+        next_state : (np.array, int)    next board
+        """
+        self.board = place_mines(self.board_size, self.num_mines)
+        self.my_board = np.ones((self.board_size, self.board_size), dtype=int) * CLOSED
+        self.valid_actions = np.ones((self.board_size, self.board_size), dtype=np.bool)
+        return self.my_board
+
+    def step(self, action):
+        """
+        See gym.Env.step().
+
+        Parameters
+        ----
+        action : np.array    location
+
+        Returns
+        ----
+        next_state : (np.array)    next board
+        reward : float        the reward for action
+        done : bool           whether the game end or not
+        info : {}
+        """
+        state = self.my_board
+        x = int(round(action[0]))
+        y = int(round(action[1]))
+
+        # test valid action
+        if bool(self.valid_actions[x, y]) is False:
+            raise Exception("Invalid action was selected! Action Filter: {}, "
+                            "action taken: {}".format(self.valid_actions, action))
+
+        next_state, reward, done, info = self.next_step(state, x, y)
+        self.my_board = next_state
+        self.valid_actions = (next_state == CLOSED)
+        info['valid_actions'] = (next_state == CLOSED)
+        return next_state, reward, done, info
+
+    def next_step(self, state, x, y):
+        """
+        Get the next observation, reward, done, and info.
+
+        Parameters
+        ----
+        state : (np.array)    visible board
+        x : int    location
+        y : int    location
+
+        Returns
+        ----
+        next_state : (np.array)    next visible board
+        reward : float               the reward
+        done : bool           whether the game end or not
+        info : {}
+        """
+        my_board = state
+        if not is_new_move(my_board, x, y):
+            return my_board, -1, False, {}
+        while True:
+            state, game_over = self.get_next_state(my_board, x, y)
+            if not game_over:
+                if is_win(state):
+                    return state, 10, True, {}
+                else:
+                    return state, 1, False, {}
+            else:
+                return state, -1, True, {}
+
+    def render(self, mode='human'):
+        """
+        See gym.Env.render().
+        """
+        outfile = StringIO() if mode == 'ansi' else sys.stdout
+        s = board2str(self.board)
+        outfile.write(s)
+        if mode != 'human':
+            return outfile
+
+
+class MinesweeperDiscreetEnv(gym.Env):
+    metadata = {"render.modes": ["ansi", "human"]}
+
+    def __init__(self, board_size=BOARD_SIZE, num_mines=NUM_MINES):
+        """
+        Create a minesweeper game.
+
+        Parameters
+        ----
+        board_size: int     shape of the board
+            - int: the same as (int, int)
+        num_mines: int   num mines on board
         """
 
-        # state = [[None for y in range(self.height)] for x in range(self.width)]
-        # for x in range(self.width):
-        #     for y in range(self.height):
-        #         if self.exposed[x][y]:
-        #             state[x][y] = self.counts[x][y]
-        # pdb.set_trace()
+        self.board_size = board_size
+        self.num_mines = num_mines
+        self.board = place_mines(board_size, num_mines)
+        self.my_board = np.ones((board_size, board_size), dtype=int) * CLOSED
+        self.num_actions = 0
 
-        state= np.asarray([[None]*self.width]*self.height)
-        counts = np.asarray(self.counts)
-        exposed = np.asarray(self.exposed)
-        state[exposed]=counts[exposed]
-        return state.tolist()
+        self.observation_space = spaces.Box(low=-2, high=9,
+                                            shape=(self.board_size, self.board_size), dtype=np.int)
+        self.action_space = spaces.Discrete(self.board_size*self.board_size)
+        self.valid_actions = np.ones((self.board_size * self.board_size), dtype=np.bool)
 
-    def is_game_over(self):
-        return self.explosion or self.num_exposed_squares == self.num_safe_squares
+    def count_neighbour_mines(self, x, y):
+        """return number of mines in neighbour cells given an x-y coordinate
 
-    def set_flags(self, flags):
-        self.flags = flags
-
-    def _place_mines(self):
-        mines = set()
-        while len(mines) < self.num_mines:
-            x = random.randint(0, self.width - 1)
-            y = random.randint(0, self.height - 1)
-            mines.add((x, y))
-            self.board[x][y] = True
-        # for coords in mines:
-        #     self.board[coords[0]][coords[1]] = True
-
-    def _init_counts(self):
-        """Calculates how many neighboring squares have minds for all squares"""
-        # pdb.set_trace()
-        
-        # for x in range(self.width):
-        #     for y in range(self.height):
-        #         for x_offset in [-1, 0, 1]:
-        #             for y_offset in [-1, 0, 1]:
-        #                 if x_offset != 0 or y_offset != 0:
-        #                     if not self._is_outside_board(x + x_offset, y + y_offset):
-        #                         self.counts[x][y] += int(self.board[x + x_offset][y + y_offset])
-        x = np.asarray(self.board,'int')
-        # self.counts = (signal.convolve2d(x, w_k, 'same')).tolist()
-        self.counts = np.asarray(self.counts,'int')
-        ndimage.convolve(x,w_k, output=self.counts ,mode='constant')
-        self.counts = self.counts.tolist()
-
-    def _update_board(self, x, y):
+            Cell -->Current Cell(row, col)
+            N -->  North(row - 1, col)
+            S -->  South(row + 1, col)
+            E -->  East(row, col + 1)
+            W -->  West(row, col - 1)
+            N.E --> North - East(row - 1, col + 1)
+            N.W --> North - West(row - 1, col - 1)
+            S.E --> South - East(row + 1, col + 1)
+            S.W --> South - West(row + 1, col - 1)
         """
-        Finds all the squares to expose based on a selection
+        neighbour_mines = 0
+        for _x in range(x - 1, x + 2):
+            for _y in range(y - 1, y + 2):
+                if is_valid(_x, _y):
+                    if is_mine(self.board, _x, _y):
+                        neighbour_mines += 1
+        return neighbour_mines
 
-        This uses an 8 neighbor region growing algorithm to expand the board if
-        the chosen square is not a neighbor to a mine.
+    def open_neighbour_cells(self, my_board, x, y):
+        """return number of mines in neighbour cells given an x-y coordinate
+
+            Cell -->Current Cell(row, col)
+            N -->  North(row - 1, col)
+            S -->  South(row + 1, col)
+            E -->  East(row, col + 1)
+            W -->  West(row, col - 1)
+            N.E --> North - East(row - 1, col + 1)
+            N.W --> North - West(row - 1, col - 1)
+            S.E --> South - East(row + 1, col + 1)
+            S.W --> South - West(row + 1, col - 1)
         """
-        self._expose_square(x, y)
-        squares = [Position(x, y, self.counts[x][y])]
-        if self.counts[x][y] != 0:
-            return squares
+        for _x in range(x-1, x+2):
+            for _y in range(y-1, y+2):
+                if is_valid(_x, _y):
+                    if is_new_move(my_board, _x, _y):
+                        my_board[_x, _y] = self.count_neighbour_mines(_x, _y)
+                        if my_board[_x, _y] == 0:
+                            my_board = self.open_neighbour_cells(my_board, _x, _y)
+        return my_board
 
-        stack = [(x, y)]
-        while len(stack) > 0:
-            (x, y) = stack.pop()
-            for x_offset in [-1, 0, 1]:
-                for y_offset in [-1, 0, 1]:
-                    if x_offset != 0 or y_offset != 0:
-                        new_x = x + x_offset
-                        new_y = y + y_offset
-                        if not self._is_outside_board(new_x, new_y):
-                            if not self.exposed[new_x][new_y]:
-                                self._expose_square(new_x, new_y)
-                                squares.append(Position(new_x, new_y, self.counts[new_x][new_y]))
-                                if self._test_count(new_x, new_y):
-                                    stack.append((new_x, new_y))
-        return squares
-
-    def _expose_square(self, x, y):
-        self.exposed[x][y] = True
-        self.num_exposed_squares += 1
-
-    def _test_count(self, x, y):
-        """Does this square have a count of zero?"""
-        return self.counts[x][y] == 0
-
-    def _is_outside_board(self, x, y):
-        if x < 0 or x == self.width:
-            return True
-        if y < 0 or y == self.height:
-            return True
-        return False
-
-    def IsActionValid(self,row,col):
-        return not(self.exposed[row][col])
-
-
-class Position(object):
-    def __init__(self, x, y, num_neighbors):
-        self.x = x
-        self.y = y
-        self.num_bomb_neighbors = num_neighbors
-
-    def __eq__(self, other):
-        return self.x == other.x and self.y == other.y and self.num_bomb_neighbors == other.num_bomb_neighbors
-
-
-class MoveResult(object):
-    def __init__(self, explosion, new_squares=[],reward=0):
-        self.explosion = explosion
-        self.new_squares = new_squares
-        self.reward = reward
-
-    def __eq__(self, other):
-        if self.explosion != other.explosion:
-            return False
-        return set(self.new_squares) == set(other.new_squares)
-
-
-class GameResult(object):
-    def __init__(self, success, num_moves):
-        self.success = success
-        self.num_moves = num_moves
-
-
-class GameAI(object):
-    __metaclass__ = ABCMeta
-
-    @abstractmethod
-    def init(self, config):
+    def get_next_state(self, state, x, y):
         """
-        Initialize an AI to play a new game
-        config is a GameConfig object
-        return is void
+        Get the next state.
+
+        Parameters
+        ----
+        state : (np.array)   visible board
+        x : int    location
+        y : int    location
+
+        Returns
+        ----
+        next_state : (np.array)    next visible board
+        game_over : (bool) true if game over
+
         """
-        pass
+        my_board = state
+        game_over = False
+        if is_mine(self.board, x, y):
+            my_board[x, y] = MINE
+            game_over = True
+        else:
+            my_board[x, y] = self.count_neighbour_mines(x, y)
+            if my_board[x, y] == 0:
+                my_board = self.open_neighbour_cells(my_board, x, y)
+        self.my_board = my_board
+        return my_board, game_over
 
-    @abstractmethod
-    def next(self):
+    def reset(self):
         """
-        Returns the next move as a tuple of (x,y)
+        Reset a new game episode. See gym.Env.reset()
+
+        Returns
+        ----
+        next_state : (np.array, int)    next board
         """
-        pass
+        self.my_board = np.ones((self.board_size, self.board_size), dtype=int) * CLOSED
+        self.board = place_mines(self.board_size, self.num_mines)
+        self.num_actions = 0
+        self.valid_actions = np.ones((self.board_size * self.board_size), dtype=bool)
 
-    @abstractmethod
-    def update(self, result):
+        return self.my_board
+
+    def step(self, action):
         """
-        Notify the AI of the result of the previous move
-        result is a MoveResult object
-        return is void
+        See gym.Env.step().
+
+        Parameters
+        ----
+        action : np.array    location
+
+        Returns
+        ----
+        next_state : (np.array)    next board
+        reward : float        the reward for action
+        done : bool           whether the game end or not
+        info : {}             {'valid_actions': valid_actions} - a binary vector,
+                                where false cells' values are already known to observer
         """
-        pass
+        state = self.my_board
+        x = int(action / self.board_size)
+        y = int(action % self.board_size)
 
-    def get_flags(self):
+        # test valid action - uncomment this part to test your action filter if needed
+        # if bool(self.valid_actions[action]) is False:
+        #    raise Exception("Invalid action was selected! Action Filter: {}, "
+        #                    "action taken: {}".format(self.valid_actions, action))
+
+        next_state, reward, done, info = self.next_step(state, x, y)
+        self.my_board = next_state
+        self.num_actions += 1
+        self.valid_actions = (next_state.flatten() == CLOSED)
+        info['valid_actions'] = self.valid_actions
+        info['num_actions'] = self.num_actions
+        return next_state, reward, done, info
+
+    def next_step(self, state, x, y):
         """
-        Return a list of coordinates for known mines. The coordinates are 2d tuples.
+        Get the next observation, reward, done, and info.
+
+        Parameters
+        ----
+        state : (np.array)    visible board
+        x : int    location
+        y : int    location
+
+        Returns
+        ----
+        next_state : (np.array)    next visible board
+        reward : float               the reward
+        done : bool           whether the game end or not
+        info : {}
         """
-        return []
+        my_board = state
+        if not is_new_move(my_board, x, y):
+            return my_board, 0, False, {}
+        while True:
+            state, game_over = self.get_next_state(my_board, x, y)
+            if not game_over:
+                if is_win(state):
+                    return state, 100, True, {}
+                else:
+                    return state, 2, False, {}
+            else:
+                return state, -1, True, {}
 
-
-"""
-Run a set of games to evaluate a GameAI
-
-Returns a list of GameResult objects
-"""
-def run_games(config, num_games, ai, viz=None):
-    results = []
-    for x in range(num_games):
-        game = Game(config)
-        ai.init(config)
-        if viz: viz.start(game)
-        while not game.is_game_over():
-            # pdb.set_trace()
-            coords = ai.next()
-            result = game.select(*coords)
-            if result is None:
-                continue
-            if not result.explosion:
-                ai.update(result)
-                game.set_flags(ai.get_flags())
-            print(np.asarray(game.get_state()))
-
-            if viz: viz.update(game)
-            # pdb.set_trace()
-
-        if result.explosion:
-            print("EXPLOOOOOOOOOSION")
-            # pdb.set_trace()
-        if viz: viz.finish()
-        results.append(GameResult(not game.explosion, game.num_moves))
-    return results
+    def render(self, mode='human'):
+        """
+        See gym.Env.render().
+        """
+        outfile = StringIO() if mode == 'ansi' else sys.stdout
+        s = board2str(self.my_board)
+        outfile.write(s)
+        if mode != 'human':
+            return outfile
