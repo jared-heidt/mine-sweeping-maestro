@@ -7,6 +7,7 @@ COLOR_REVEALED_TILE = (192, 192, 192)
 COLOR_UNREVEALED_TILE = (128, 128, 128)
 COLOR_SCREEN_FILL = (255, 255, 255)
 
+
 class Tile:
     def __init__(self, row, col, size_of_square):
         self.row = row
@@ -44,15 +45,20 @@ class Tile:
             if self.is_flagged:
                 text = myfont.render("F", 1, COLOR_FLAG)
                 screen.blit(text, (self.col * self.size_of_square + 20, self.row * self.size_of_square + 20))
-                
+
+# This is the environment   
 class MinesweeperGrid:
     def __init__(self, rows, cols, size_of_square, mines):
-        self.rows = rows
-        self.cols = cols
+        self.rows = rows # nrows
+        self.cols = cols # ncolsss=
         self.size_of_square = size_of_square
         self.tiles = [[Tile(row, col, size_of_square) for col in range(cols)] for row in range(rows)]
         self.plant_mines(mines)
         self.game_over = False
+        self.rewards = REWARDS
+        self.clicks = 0
+        self.progress = 0
+        self.wins = 0
         
     def plant_mines(self, num_mines):
         bomb_positions = random.sample([(r, c) for r in range(self.rows) for c in range(self.cols)], num_mines)
@@ -95,12 +101,15 @@ class MinesweeperGrid:
                     neighbors.append((neighbor_row, neighbor_col))
                     
         return neighbors
+    
 
+    # Visuals
     def draw(self, screen, myfont):
         for row in range(self.rows):
             for col in range(self.cols):
                 self.tiles[row][col].draw(screen, myfont)
-                
+
+# Use for playing the game manually       
 class Game:
     def __init__(self, rows, cols, size_of_square, mines):
         self.grid = MinesweeperGrid(rows, cols, size_of_square, mines)
